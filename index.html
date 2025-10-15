@@ -13,7 +13,12 @@
     *{box-sizing:border-box}
     html,body{height:100%}
     body{margin:0;font:14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial; background:var(--bg); color:var(--text)}
+
+    /* Layout */
     .app{max-width:1200px;margin:0 auto;padding:24px}
+    .layout{display:grid;grid-template-columns:300px 1fr;gap:16px}
+    @media (max-width:980px){ .layout{grid-template-columns:1fr} .sidebar{order:2} }
+
     header{display:flex;align-items:center;gap:12px;justify-content:space-between;margin-bottom:16px}
     .brand{display:flex;gap:10px;align-items:center}
     .logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--acc),#7ad3ff)}
@@ -21,30 +26,29 @@
     .sub{color:var(--sub)}
     .row{display:flex;gap:var(--gap);align-items:center}
     .panel{background:var(--panel);border:1px solid #1a2330;border-radius:var(--radius);padding:14px}
-    .tabs{display:flex;gap:8px}
-    .tab{padding:8px 12px;border-radius:999px;background:#0e141b;color:var(--sub);cursor:pointer;border:1px solid #1a2330}
-    .tab.active{background:var(--acc);color:#08233f;border-color:transparent}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#0e141b;border:1px solid #1a2330;color:var(--sub);font-size:11px}
+
     button,.btn{cursor:pointer;border:none;background:var(--acc);color:#08233f;padding:8px 12px;border-radius:10px;font-weight:600}
     button.ghost,.btn.ghost{background:#0e141b;color:var(--sub);border:1px solid #1a2330}
     input,textarea,select{width:100%;background:#0e141b;border:1px solid #1a2330;color:var(--text);padding:10px;border-radius:10px}
     label{font-size:12px;color:var(--sub)}
-    .grid{display:grid;gap:var(--gap)}
-    .cols{display:grid;gap:var(--gap);grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+
+    /* Kanban */
+    .cols{display:grid;gap:var(--gap);grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
     .col{min-height:200px}
-    .col header{justify-content:space-between;margin-bottom:8px}
-    .task{background:var(--muted);border:1px solid #223047;border-radius:12px;padding:10px;margin-bottom:10px}
+    .col header{justify-content:space-between;margin-bottom:8px;display:flex;align-items:center}
+    .task{background:var(--muted);border:1px solid #223047;border-radius:12px;padding:10px;margin-bottom:10px;outline:0}
     .task small{color:var(--sub)}
     .task.dragging{opacity:.6}
+    .task.selected{outline:2px solid var(--acc)}
     .drop{border:2px dashed #2a3a52;border-radius:12px;padding:8px;min-height:20px}
-    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
-    .kv{display:grid;grid-template-columns:120px 1fr;gap:8px;align-items:center}
-    .auth-card{max-width:420px;margin:80px auto}
-    .center{text-align:center}
-    .link{color:#7ad3ff;text-decoration:underline;cursor:pointer}
 
-    /* Habit tracker */
+    /* Sidebar (Habits always visible) */
+    .sidebar{position:sticky;top:16px;height:max-content}
     .habit{border:1px solid #1a2330;border-radius:12px;padding:12px;background:var(--panel)}
     .habit header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .habits-list{display:grid;gap:10px}
     .days{display:grid;grid-template-columns:repeat(7, 28px);gap:6px}
     .dot{width:28px;height:28px;border-radius:8px;background:#0e141b;border:1px solid #1a2330;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--sub);cursor:pointer}
     .dot.done{background:var(--good);color:#04210f;border-color:#1f9a4c}
@@ -54,7 +58,13 @@
     .spacer{height:6px}
     .danger{background:var(--bad)!important;color:#2a0c10}
     .warn{background:var(--warn)!important;color:#231a05}
-    .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#0e141b;border:1px solid #1a2330;color:var(--sub);font-size:11px}
+
+    /* Modal */
+    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;z-index:20}
+    .modal{max-width:560px;width:100%;background:var(--panel);border:1px solid #1a2330;border-radius:16px;padding:16px}
+
+    .project-chip{display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:999px;border:1px solid #1a2330;background:#0e141b}
+    .dot-swatch{width:10px;height:10px;border-radius:50%}
   </style>
 </head>
 <body>
@@ -67,6 +77,7 @@ const el = (tag, attrs={}, ...children) => {
   const node = document.createElement(tag);
   Object.entries(attrs).forEach(([k,v])=>{
     if(k.startsWith('on') && typeof v==='function') node.addEventListener(k.slice(2),v);
+    else if(k==='class' && typeof v==='object') node.className=v.join(' ');
     else if(v===true) node.setAttribute(k, k);
     else if(v!==false && v!=null) node.setAttribute(k, v);
   });
@@ -75,9 +86,10 @@ const el = (tag, attrs={}, ...children) => {
 };
 const todayISO = () => new Date().toISOString().slice(0,10);
 const fmtDateShort = d => new Date(d).toLocaleDateString(undefined,{month:'short',day:'numeric'});
+const clamp = (n,min,max)=>Math.max(min,Math.min(max,n));
 
 // -------------------- Storage (plain localStorage) --------------------
-const KEY = 'lm_v2_plain';
+const KEY = 'lm_v3_projects_sidebar';
 const blankData = () => ({
   createdAt: new Date().toISOString(),
   columns: [
@@ -85,7 +97,11 @@ const blankData = () => ({
     { id: 'doing', name: 'Doing', order: 1 },
     { id: 'done', name: 'Done', order: 2 },
   ],
-  tasks: [], // {id, title, note, columnId, createdAt}
+  projects: [ // {id, name, desc, color, createdAt}
+    { id: 'general', name: 'General', desc: '', color: '#7ad3ff', createdAt: new Date().toISOString() }
+  ],
+  activeProjectId: 'general',
+  tasks: [], // {id, title, note, columnId, projectId, createdAt}
   habits: [], // {id, name, createdAt}
   marks: {}, // { habitId: [ISO date] }
 });
@@ -93,16 +109,39 @@ const blankData = () => ({
 function load(){
   try{
     const raw = localStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) : blankData();
+    if(!raw){
+      // try migrate from previous key if present
+      const prev = localStorage.getItem('lm_v2_plain');
+      if(prev){
+        const p = JSON.parse(prev);
+        const now = new Date().toISOString();
+        const migrated = blankData();
+        migrated.columns = p.columns || migrated.columns;
+        migrated.tasks = (p.tasks||[]).map(t=>({...t, projectId:'general'}));
+        migrated.habits = p.habits||[];
+        migrated.marks = p.marks||{};
+        migrated.createdAt = p.createdAt || now;
+        localStorage.setItem(KEY, JSON.stringify(migrated));
+        return migrated;
+      }
+      return blankData();
+    }
+    const obj = JSON.parse(raw);
+    // ensure defaults
+    if(!obj.projects || obj.projects.length===0){ obj.projects = blankData().projects; }
+    if(!obj.activeProjectId) obj.activeProjectId = obj.projects[0].id;
+    if(obj.tasks) obj.tasks.forEach(t=>{ if(!t.projectId) t.projectId = obj.activeProjectId||'general'; });
+    save(obj);
+    return obj;
   }catch{ return blankData(); }
 }
-function save(){ localStorage.setItem(KEY, JSON.stringify(DATA)); }
+function save(newData){ if(newData) DATA = newData; localStorage.setItem(KEY, JSON.stringify(DATA)); }
 function uuid(){ return 't' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
 
 let DATA = load();
 
 // -------------------- App Boot --------------------
-function bootstrap(){ renderApp(); }
+function bootstrap(){ renderApp(); attachGlobalShortcuts(); }
 
 // -------------------- UI: Main App --------------------
 function renderApp(){
@@ -110,76 +149,149 @@ function renderApp(){
   const head = el('header',{},
     el('div',{class:'brand'}, el('div',{class:'logo'}), el('h1',{},'Life Manager'), el('span',{class:'pill'}, new URL(location).host||'local')),
     el('div',{class:'toolbar'},
-      el('button',{class:'ghost', onclick:()=>exportData()},'Export JSON'),
-      el('button',{class:'ghost', onclick:()=>importData()},'Import JSON'),
-      el('button',{class:'warn', onclick:()=>addSampleData()},'Sample Data'),
-      el('button',{class:'danger', onclick:()=>resetAll()},'Reset')
+      el('span',{}, 'Project:'),
+      renderProjectPicker(),
+      el('button',{class:'ghost', onclick:()=>openProjectsManager()},'Projects'),
+      el('button',{class:'ghost', onclick:()=>exportData()},'Export'),
+      el('button',{class:'ghost', onclick:()=>importData()},'Import'),
+      el('button',{class:'warn', onclick:()=>addSampleData()},'Sample'),
+      el('button',{class:'danger', onclick:()=>resetAll()},'Reset'),
+      el('span',{class:'pill', title:'Keyboard shortcuts'},'?/help')
     )
   );
-  const tabs = el('div',{class:'tabs'},
-    el('div',{class:'tab active', id:'tab-kanban', onclick:()=>show('kanban')},'Kanban'),
-    el('div',{class:'tab', id:'tab-habits', onclick:()=>show('habits')},'Habits')
-  );
-  const area = el('div',{id:'area'});
-  $('#app').append(head, tabs, area);
-  show('kanban');
+
+  const layout = el('div',{class:'layout'});
+  layout.append(renderSidebar(), renderMain());
+
+  root.append(head, layout);
 }
 
-function show(which){
-  $('#tab-kanban').classList.toggle('active', which==='kanban');
-  $('#tab-habits').classList.toggle('active', which==='habits');
-  const area = $('#area'); area.innerHTML = '';
-  if(which==='kanban') renderKanban(area); else renderHabits(area);
-}
-
-// -------------------- Kanban --------------------
-function renderKanban(area){
+function renderSidebar(){
+  const box = el('aside',{class:'sidebar'});
   const top = el('div',{class:'panel'},
     el('div',{class:'row'},
-      el('input',{id:'newTaskTitle',placeholder:'Quick add task…', onkeydown:(e)=>{ if(e.key==='Enter') addTask(); }}),
+      el('input',{id:'newHabit',placeholder:'Add a habit', onkeydown:(e)=>{ if(e.key==='Enter') addHabit(); }}),
+      el('button',{onclick:()=>addHabit()},'Add')
+    ),
+    el('div',{class:'sub', style:'margin-top:8px'}, 'Click a day to toggle. Last 28 days.')
+  );
+  const list = el('div',{class:'habits-list'});
+  for(const h of DATA.habits){ list.append(renderHabit(h)); }
+  box.append(top, list);
+  return box;
+}
+
+function renderMain(){
+  const wrap = el('main',{});
+  const top = el('div',{class:'panel'},
+    el('div',{class:'row'},
+      el('input',{id:'newTaskTitle',placeholder:'Quick add task… (n)', onkeydown:(e)=>{ if(e.key==='Enter') addTask(); }}),
       el('button',{onclick:()=>addTask()},'Add')
     ),
     el('div',{class:'row',style:'margin-top:8px;gap:8px;flex-wrap:wrap'},
       el('button',{class:'ghost',onclick:()=>addColumnPrompt()},'Add Column'),
-      el('span',{class:'sub'}, `${DATA.tasks.length} tasks`)
+      el('span',{class:'sub'}, `${DATA.tasks.filter(t=>t.projectId===DATA.activeProjectId).length} tasks in project`)
     )
   );
   const colsWrap = el('div',{class:'cols'});
   const cols = [...DATA.columns].sort((a,b)=>a.order-b.order);
   for(const col of cols){ colsWrap.append(renderColumn(col)); }
-  area.append(top, colsWrap);
+  wrap.append(top, colsWrap);
+  return wrap;
 }
 
-function addTask(){
-  const input = $('#newTaskTitle'); const title = input.value.trim(); if(!title) return;
-  const firstCol = [...DATA.columns].sort((a,b)=>a.order-b.order)[0];
-  DATA.tasks.push({id:uuid(), title, note:'', columnId:firstCol.id, createdAt:new Date().toISOString()});
-  input.value=''; save(); show('kanban');
+// -------------------- Projects --------------------
+function renderProjectPicker(){
+  const sel = el('select',{id:'projectPicker', onchange:(e)=>{ DATA.activeProjectId = e.target.value; save(); renderApp(); }});
+  for(const p of DATA.projects){ sel.append(el('option',{value:p.id, selected: p.id===DATA.activeProjectId}, p.name)); }
+  return sel;
 }
-function addColumnPrompt(){
-  const name = prompt('Column name'); if(!name) return;
-  const maxOrder = DATA.columns.reduce((m,c)=>Math.max(m,c.order), -1);
-  DATA.columns.push({id:uuid(), name: name.trim(), order:maxOrder+1});
-  save(); show('kanban');
+
+function openProjectsManager(p=null){
+  const close = ()=>{ modal.remove(); };
+  const project = p || DATA.projects.find(x=>x.id===DATA.activeProjectId);
+  const isNew = !p;
+  const nameInput = el('input',{placeholder:'Project name', value: project?.name||''});
+  const colorInput = el('input',{type:'color', value: project?.color||'#7ad3ff', style:'width:64px;height:40px;padding:0'});
+  const descInput = el('textarea',{rows:4, placeholder:'Details/notes'}, project?.desc||'');
+
+  const createBtn = el('button', { onclick: ()=>{
+    const name = nameInput.value.trim(); if(!name) return;
+    const pr = { id: uuid(), name, desc: descInput.value.trim(), color: colorInput.value, createdAt: new Date().toISOString() };
+    DATA.projects.push(pr); DATA.activeProjectId = pr.id; save(); renderApp(); close();
+  }}, 'Create');
+
+  const saveBtn = el('button', { onclick: ()=>{
+    const current = DATA.projects.find(x=>x.id===project.id); if(!current) return;
+    current.name = nameInput.value.trim()||current.name;
+    current.desc = descInput.value.trim();
+    current.color = colorInput.value;
+    save(); renderApp(); close();
+  }}, 'Save');
+
+  const delBtn = el('button', { class:'danger', onclick: ()=>{
+    if(!confirm('Delete project? Tasks will move to General.')) return;
+    const general = DATA.projects.find(x=>x.id==='general') || { id:'general', name:'General', desc:'', color:'#7ad3ff', createdAt:new Date().toISOString() };
+    if(!DATA.projects.find(x=>x.id==='general')) DATA.projects.unshift(general);
+    DATA.tasks.forEach(t=>{ if(t.projectId===project.id) t.projectId = 'general'; });
+    DATA.projects = DATA.projects.filter(x=>x.id!==project.id);
+    DATA.activeProjectId = 'general'; save(); renderApp(); close();
+  }}, 'Delete');
+
+  const list = el('div', { class:'panel', style:'margin-top:12px' },
+    el('strong',{},'All projects'),
+    ...DATA.projects.map(pp=> el('div',{style:'margin-top:8px;display:flex;align-items:center;justify-content:space-between'},
+      el('span',{}, el('span',{class:'project-chip'}, el('span',{class:'dot-swatch',style:`background:${pp.color}`}), ' ', pp.name)),
+      el('div',{},
+        el('span',{class:'link', onclick:()=>{ openProjectsManager(pp); }}, 'Open'), ' · ',
+        el('span',{class:'link', onclick:()=>{ DATA.activeProjectId = pp.id; save(); renderApp(); }}, 'Activate')
+      )
+    ))
+  );
+
+  const modal = el('div',{class:'modal-backdrop', onclick:(e)=>{ if(e.target===modal) modal.remove(); }},
+    el('div',{class:'modal'},
+      el('div',{class:'row',style:'justify-content:space-between'},
+        el('h2',{}, isNew? 'New Project' : 'Edit Project'),
+        el('button',{class:'ghost',onclick:close},'Close')
+      ),
+      el('div',{class:'grid',style:'gap:10px;margin-top:8px'},
+        el('div',{}, el('label',{}, 'Name'), nameInput),
+        el('div',{}, el('label',{}, 'Color'), colorInput),
+        el('div',{}, el('label',{}, 'Details'), descInput),
+        el('div',{}, el('label',{}, 'Actions'), el('div',{class:'row'}, isNew? createBtn : saveBtn, !isNew? delBtn : null))
+      ),
+      list,
+      el('div',{class:'footer'}, 'Hint: use the picker in the toolbar to switch the active project. Tasks are filtered by active project.')
+    )
+  );
+  document.body.append(modal);
 }
+
+// -------------------- Kanban --------------------
+function filteredTasksBy(colId){ return DATA.tasks.filter(t=>t.columnId===colId && t.projectId===DATA.activeProjectId); }
 
 function renderColumn(col){
   const wrap = el('div',{class:'panel col', ondragover:(e)=>{e.preventDefault();}, ondrop:(e)=>onDrop(e,col.id)});
+  const p = DATA.projects.find(x=>x.id===DATA.activeProjectId);
   wrap.append(
-    el('header',{}, el('h2',{}, col.name), el('div',{},
-      el('span',{class:'pill'}, DATA.tasks.filter(t=>t.columnId===col.id).length+' tasks'), ' ',
-      el('span',{class:'link', onclick:()=>renameColumn(col)}, 'Rename') ,' · ',
-      el('span',{class:'link', onclick:()=>deleteColumn(col)}, 'Delete')
-    )),
-    el('div',{class:'drop'}, ...DATA.tasks.filter(t=>t.columnId===col.id).map(t=>renderTask(t)))
+    el('header',{},
+      el('h2',{}, col.name),
+      el('div',{},
+        el('span',{class:'pill'}, filteredTasksBy(col.id).length+' tasks'), ' ',
+        el('span',{class:'link', onclick:()=>renameColumn(col)}, 'Rename') ,' · ',
+        el('span',{class:'link', onclick:()=>deleteColumn(col)}, 'Delete')
+      )
+    ),
+    el('div',{class:'drop', "data-col": col.id}, ...filteredTasksBy(col.id).map(t=>renderTask(t, p)))
   );
   return wrap;
 }
 
-function renderTask(t){
-  const card = el('div',{class:'task', draggable:true, ondragstart:(e)=>{card.classList.add('dragging'); e.dataTransfer.setData('text/plain', t.id);}, ondragend:()=>card.classList.remove('dragging')},
+function renderTask(t, project){
+  const card = el('div',{class:'task', tabindex:0, draggable:true, ondragstart:(e)=>{card.classList.add('dragging'); e.dataTransfer.setData('text/plain', t.id);}, ondragend:()=>card.classList.remove('dragging')},
     el('div',{style:'display:flex;justify-content:space-between;align-items:center'},
-      el('strong',{}, t.title),
+      el('div',{}, el('strong',{}, t.title), ' ', project? el('span',{class:'pill',style:`margin-left:6px;border-color:${project.color}`}, project.name): null),
       el('div',{},
         el('span',{class:'link', onclick:()=>editTask(t)},'Edit'),' · ',
         el('span',{class:'link', onclick:()=>delTask(t)},'Del')
@@ -188,40 +300,62 @@ function renderTask(t){
     t.note ? el('small',{}, t.note) : null,
     el('div',{}, el('small',{class:'sub'}, 'Created '+fmtDateShort(t.createdAt)))
   );
+  // selection state for keyboard ops
+  card.addEventListener('focus', ()=>{ document.querySelectorAll('.task.selected').forEach(n=>n.classList.remove('selected')); card.classList.add('selected'); selectedTaskId = t.id; });
+  card.addEventListener('click', ()=>{ document.querySelectorAll('.task.selected').forEach(n=>n.classList.remove('selected')); card.classList.add('selected'); selectedTaskId = t.id; });
   return card;
+}
+
+function addTask(){
+  const input = $('#newTaskTitle'); const title = input.value.trim(); if(!title) return;
+  const firstCol = [...DATA.columns].sort((a,b)=>a.order-b.order)[0];
+  DATA.tasks.push({id:uuid(), title, note:'', columnId:firstCol.id, projectId:DATA.activeProjectId, createdAt:new Date().toISOString()});
+  input.value=''; save(); renderApp();
+}
+function addColumnPrompt(){
+  const name = prompt('Column name'); if(!name) return;
+  const maxOrder = DATA.columns.reduce((m,c)=>Math.max(m,c.order), -1);
+  DATA.columns.push({id:uuid(), name: name.trim(), order:maxOrder+1});
+  save(); renderApp();
 }
 
 function onDrop(e, columnId){
   const id = e.dataTransfer.getData('text/plain');
   const t = DATA.tasks.find(x=>x.id===id); if(!t) return;
-  t.columnId = columnId; save(); show('kanban');
+  t.columnId = columnId; save(); renderApp();
 }
 
 function editTask(t){
-  const title = prompt('Title', t.title); if(title==null) return;
-  const note = prompt('Notes', t.note||''); if(note==null) return;
-  t.title = title.trim(); t.note = note.trim(); save(); show('kanban');
+  const modalClose = ()=>modal.remove();
+  const title = el('input',{value:t.title});
+  const note = el('textarea',{rows:4}, t.note||'');
+  const colSel = el('select',{}); [...DATA.columns].sort((a,b)=>a.order-b.order).forEach(c=> colSel.append(el('option',{value:c.id,selected:c.id===t.columnId},c.name)) );
+  const projSel = el('select',{}); DATA.projects.forEach(p=> projSel.append(el('option',{value:p.id,selected:p.id===t.projectId},p.name)) );
+
+  const saveBtn = el('button',{onclick:()=>{ t.title=title.value.trim()||t.title; t.note=note.value.trim(); t.columnId=colSel.value; t.projectId=projSel.value; save(); renderApp(); modalClose(); }}, 'Save');
+
+  const modal = el('div',{class:'modal-backdrop', onclick:(e)=>{ if(e.target===modal) modalClose(); }},
+    el('div',{class:'modal'},
+      el('div',{class:'row',style:'justify-content:space-between'}, el('h2',{},'Edit Task'), el('button',{class:'ghost',onclick:modalClose},'Close')),
+      el('div',{class:'grid',style:'gap:10px;margin-top:8px'},
+        el('div',{}, el('label',{},'Title'), title),
+        el('div',{}, el('label',{},'Notes'), note),
+        el('div',{}, el('label',{},'Column'), colSel),
+        el('div',{}, el('label',{},'Project'), projSel),
+        el('div',{}, saveBtn)
+      )
+    )
+  );
+  document.body.append(modal);
 }
-function delTask(t){ if(!confirm('Delete task?')) return; DATA.tasks = DATA.tasks.filter(x=>x.id!==t.id); save(); show('kanban'); }
-function renameColumn(col){ const name = prompt('New name', col.name); if(name==null) return; col.name = name.trim(); save(); show('kanban'); }
-function deleteColumn(col){ if(!confirm('Delete column and keep tasks? Tasks will move to Backlog.')) return; const fallback = DATA.columns[0]?.id; DATA.tasks.forEach(t=>{ if(t.columnId===col.id) t.columnId=fallback; }); DATA.columns = DATA.columns.filter(c=>c.id!==col.id); save(); show('kanban'); }
+
+function delTask(t){ if(!confirm('Delete task?')) return; DATA.tasks = DATA.tasks.filter(x=>x.id!==t.id); save(); renderApp(); }
+function renameColumn(col){ const name = prompt('New name', col.name); if(name==null) return; col.name = name.trim(); save(); renderApp(); }
+function deleteColumn(col){ if(!confirm('Delete column and keep tasks? Tasks will move to Backlog.')) return; const fallback = DATA.columns[0]?.id; DATA.tasks.forEach(t=>{ if(t.columnId===col.id) t.columnId=fallback; }); DATA.columns = DATA.columns.filter(c=>c.id!==col.id); save(); renderApp(); }
 
 // -------------------- Habits --------------------
-function renderHabits(area){
-  const top = el('div',{class:'panel'},
-    el('div',{class:'row'},
-      el('input',{id:'newHabit',placeholder:'Add a habit (e.g., “Run”, “Read”)', onkeydown:(e)=>{ if(e.key==='Enter') addHabit(); }}),
-      el('button',{onclick:()=>addHabit()},'Add')
-    ),
-    el('div',{class:'sub', style:'margin-top:8px'}, 'Click a day to toggle done. Shows the last 28 days.')
-  );
-  const list = el('div',{class:'grid'});
-  for(const h of DATA.habits){ list.append(renderHabit(h)); }
-  area.append(top, list);
-}
-
-function addHabit(){ const input = $('#newHabit'); const name = input.value.trim(); if(!name) return; DATA.habits.push({id:uuid(), name, createdAt:new Date().toISOString()}); input.value=''; save(); show('habits'); }
-function removeHabit(h){ if(!confirm('Delete habit and its marks?')) return; delete DATA.marks[h.id]; DATA.habits = DATA.habits.filter(x=>x.id!==h.id); save(); show('habits'); }
+function addHabit(){ const input = $('#newHabit'); const name = input.value.trim(); if(!name) return; DATA.habits.push({id:uuid(), name, createdAt:new Date().toISOString()}); input.value=''; save(); renderApp(); }
+function removeHabit(h){ if(!confirm('Delete habit and its marks?')) return; delete DATA.marks[h.id]; DATA.habits = DATA.habits.filter(x=>x.id!==h.id); save(); renderApp(); }
 
 function renderHabit(h){
   const wrap = el('div',{class:'habit'});
@@ -234,7 +368,7 @@ function renderHabit(h){
   for(const d of days){
     const iso = d.toISOString().slice(0,10);
     const done = set.has(iso);
-    const dot = el('div',{class:'dot'+(done?' done':'')+(iso===todayISO()?' today':''), title: fmtDateShort(iso), onclick:()=>{ if(set.has(iso)) set.delete(iso); else set.add(iso); markMap[h.id]=[...set]; save(); show('habits'); }}, d.getDate().toString());
+    const dot = el('div',{class:'dot'+(done?' done':'')+(iso===todayISO()?' today':''), title: fmtDateShort(iso), onclick:()=>{ if(set.has(iso)) set.delete(iso); else set.add(iso); markMap[h.id]=[...set]; save(); renderApp(); }}, d.getDate().toString());
     grid.append(dot);
   }
   wrap.append(
@@ -246,7 +380,7 @@ function renderHabit(h){
   );
   return wrap;
 }
-function renameHabit(h){ const name=prompt('New name',h.name); if(name==null) return; h.name=name.trim(); save(); show('habits'); }
+function renameHabit(h){ const name=prompt('New name',h.name); if(name==null) return; h.name=name.trim(); save(); renderApp(); }
 
 // -------------------- Export / Import / Samples / Reset --------------------
 function exportData(){
@@ -260,13 +394,87 @@ function importData(){
   inp.onchange = ()=>{
     const f = inp.files[0]; if(!f) return;
     const reader = new FileReader();
-    reader.onload = () => { try{ const obj = JSON.parse(reader.result); DATA = obj; save(); renderApp(); } catch{ alert('Invalid file'); } };
+    reader.onload = () => { try{ const obj = JSON.parse(reader.result);
+      // basic sanity
+      if(!obj.columns||!obj.tasks||!obj.habits||!obj.projects) throw new Error('Invalid');
+      DATA = obj; save(); renderApp(); } catch{ alert('Invalid file'); } };
     reader.readAsText(f);
   };
   inp.click();
 }
-function addSampleData(){ if(!confirm('Add example columns, tasks, and habits?')) return; const d = DATA; d.columns = [{id:'backlog',name:'Backlog',order:0},{id:'doing',name:'Doing',order:1},{id:'blocked',name:'Blocked',order:2},{id:'done',name:'Done',order:3}]; d.tasks=[{id:uuid(), title:'Plan week', note:'Sketch priorities', columnId:'backlog', createdAt:new Date().toISOString()},{id:uuid(), title:'Email X', note:'Follow up', columnId:'doing', createdAt:new Date().toISOString()},{id:uuid(), title:'Workout', note:'Push day', columnId:'done', createdAt:new Date().toISOString()}]; d.habits=[{id:uuid(), name:'Read 20m', createdAt:new Date().toISOString()},{id:uuid(), name:'Run', createdAt:new Date().toISOString()}]; d.marks = {}; save(); show('kanban'); }
+function addSampleData(){ if(!confirm('Add example columns, tasks, habits, projects?')) return; const d = DATA; d.columns = [{id:'backlog',name:'Backlog',order:0},{id:'doing',name:'Doing',order:1},{id:'blocked',name:'Blocked',order:2},{id:'done',name:'Done',order:3}];
+  const pj1 = {id:uuid(), name:'Website Redesign', desc:'Marketing site revamp', color:'#7ad3ff', createdAt:new Date().toISOString()};
+  const pj2 = {id:uuid(), name:'Personal', desc:'Life admin', color:'#a3e635', createdAt:new Date().toISOString()};
+  d.projects = [{id:'general', name:'General', desc:'', color:'#7ad3ff', createdAt:new Date().toISOString()}, pj1, pj2];
+  d.activeProjectId = pj1.id;
+  d.tasks=[{id:uuid(), title:'Plan week', note:'Sketch priorities', columnId:'backlog', projectId:pj1.id, createdAt:new Date().toISOString()},{id:uuid(), title:'Email X', note:'Follow up', columnId:'doing', projectId:pj1.id, createdAt:new Date().toISOString()},{id:uuid(), title:'Workout', note:'Push day', columnId:'done', projectId:pj2.id, createdAt:new Date().toISOString()}];
+  d.habits=[{id:uuid(), name:'Read 20m', createdAt:new Date().toISOString()},{id:uuid(), name:'Run', createdAt:new Date().toISOString()}]; d.marks = {}; save(); renderApp(); }
 function resetAll(){ if(!confirm('Wipe local data?')) return; localStorage.removeItem(KEY); DATA = blankData(); save(); renderApp(); }
+
+// -------------------- Keyboard Shortcuts --------------------
+let selectedTaskId = null;
+function attachGlobalShortcuts(){
+  document.addEventListener('keydown', (e)=>{
+    if(e.target && ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return; // don't hijack typing
+    const cols = [...DATA.columns].sort((a,b)=>a.order-b.order);
+    const tasksInProject = DATA.tasks.filter(t=>t.projectId===DATA.activeProjectId);
+    const selIndex = tasksInProject.findIndex(t=>t.id===selectedTaskId);
+
+    // help
+    if(e.key==='?' || (e.shiftKey && e.key==='/')){ e.preventDefault(); showHelp(); return; }
+
+    // quick add
+    if(e.key==='n'){ e.preventDefault(); $('#newTaskTitle')?.focus(); return; }
+
+    // navigate selection
+    if(e.key==='ArrowDown' || e.key==='j'){ e.preventDefault();
+      const next = clamp(selIndex+1, 0, tasksInProject.length-1); focusTask(tasksInProject[next]?.id); return; }
+    if(e.key==='ArrowUp' || e.key==='k'){ e.preventDefault();
+      const prev = clamp(selIndex-1, 0, tasksInProject.length-1); focusTask(tasksInProject[prev]?.id); return; }
+
+    // edit / delete
+    if(e.key==='e' && selectedTaskId){ e.preventDefault(); const t = DATA.tasks.find(x=>x.id===selectedTaskId); if(t) editTask(t); return; }
+    if((e.key==='Delete' || e.key==='Backspace') && selectedTaskId){ e.preventDefault(); const t = DATA.tasks.find(x=>x.id===selectedTaskId); if(t) delTask(t); return; }
+
+    // move task between columns
+    if(selectedTaskId && (e.key==='[' || e.key===']' || e.key==='<' || e.key==='>')){
+      e.preventDefault();
+      const t = DATA.tasks.find(x=>x.id===selectedTaskId); if(!t) return;
+      const idx = cols.findIndex(c=>c.id===t.columnId);
+      const dir = (e.key==='[' || e.key=== '<') ? -1 : 1;
+      const next = cols[clamp(idx+dir, 0, cols.length-1)];
+      t.columnId = next.id; save(); renderApp(); focusTask(t.id); return;
+    }
+
+    // switch columns (1..9)
+    if(/^[1-9]$/.test(e.key)){
+      const n = Number(e.key)-1; const c = cols[n]; if(!c) return;
+      // focus first task in that column
+      const list = DATA.tasks.filter(t=>t.projectId===DATA.activeProjectId && t.columnId===c.id);
+      if(list[0]){ focusTask(list[0].id); }
+      return;
+    }
+  });
+}
+
+function focusTask(id){ if(!id) return; selectedTaskId = id; const node = document.querySelector('.task.selected'); if(node) node.classList.remove('selected'); const next = [...document.querySelectorAll('.task')].find(n=> n.textContent.includes(DATA.tasks.find(t=>t.id===id)?.title)); if(next){ next.classList.add('selected'); next.focus({preventScroll:false}); next.scrollIntoView({block:'nearest'}); } }
+
+function showHelp(){
+  const close = ()=>modal.remove();
+  const modal = el('div',{class:'modal-backdrop', onclick:(e)=>{ if(e.target===modal) close(); }},
+    el('div',{class:'modal'},
+      el('div',{class:'row',style:'justify-content:space-between'}, el('h2',{},'Shortcuts'), el('button',{class:'ghost',onclick:close},'Close')),
+      el('div',{},
+        el('p',{}, 'Global: n (quick add), ? (help).'),
+        el('p',{}, 'Selection: j/k or ↑/↓ to move.'),
+        el('p',{}, 'Task: e (edit), Delete (delete).'),
+        el('p',{}, 'Move task across columns: [ or < to left, ] or > to right.'),
+        el('p',{}, 'Switch to column: 1..9.')
+      )
+    )
+  );
+  document.body.append(modal);
+}
 
 // Init
 bootstrap();
