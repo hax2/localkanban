@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Life Manager – Local-First</title>
+  <meta name="description" content="Local-first kanban + habits with client-side sign-in. Host anywhere static (e.g., GitHub Pages)." />
+  <style>
+    :root{
+      --bg:#0b0f14; --panel:#10161d; --muted:#1b2430; --text:#e6edf3; --sub:#9fb2c8; --acc:#3fa2ff; --good:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+      --radius:14px; --gap:12px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font:14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial; background:var(--bg); color:var(--text)}
+    .app{max-width:1200px;margin:0 auto;padding:24px}
+    header{display:flex;align-items:center;gap:12px;justify-content:space-between;margin-bottom:16px}
+    .brand{display:flex;gap:10px;align-items:center}
+    .logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--acc),#7ad3ff)}
+    h1{margin:0;font-size:18px;font-weight:700}
+    .sub{color:var(--sub)}
+    .row{display:flex;gap:var(--gap);align-items:center}
+    .panel{background:var(--panel);border:1px solid #1a2330;border-radius:var(--radius);padding:14px}
+    .tabs{display:flex;gap:8px}
+    .tab{padding:8px 12px;border-radius:999px;background:#0e141b;color:var(--sub);cursor:pointer;border:1px solid #1a2330}
+    .tab.active{background:var(--acc);color:#08233f;border-color:transparent}
+    button,.btn{cursor:pointer;border:none;background:var(--acc);color:#08233f;padding:8px 12px;border-radius:10px;font-weight:600}
+    button.ghost,.btn.ghost{background:#0e141b;color:var(--sub);border:1px solid #1a2330}
+    input,textarea,select{width:100%;background:#0e141b;border:1px solid #1a2330;color:var(--text);padding:10px;border-radius:10px}
+    label{font-size:12px;color:var(--sub)}
+    .grid{display:grid;gap:var(--gap)}
+    .cols{display:grid;gap:var(--gap);grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+    .col{min-height:200px}
+    .col header{justify-content:space-between;margin-bottom:8px}
+    .task{background:var(--muted);border:1px solid #223047;border-radius:12px;padding:10px;margin-bottom:10px}
+    .task small{color:var(--sub)}
+    .task.dragging{opacity:.6}
+    .drop{border:2px dashed #2a3a52;border-radius:12px;padding:8px;min-height:20px}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+    .kv{display:grid;grid-template-columns:120px 1fr;gap:8px;align-items:center}
+    .auth-card{max-width:420px;margin:80px auto}
+    .center{text-align:center}
+    .link{color:#7ad3ff;text-decoration:underline;cursor:pointer}
+
+    /* Habit tracker */
+    .habit{border:1px solid #1a2330;border-radius:12px;padding:12px;background:var(--panel)}
+    .habit header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .days{display:grid;grid-template-columns:repeat(7, 28px);gap:6px}
+    .dot{width:28px;height:28px;border-radius:8px;background:#0e141b;border:1px solid #1a2330;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--sub);cursor:pointer}
+    .dot.done{background:var(--good);color:#04210f;border-color:#1f9a4c}
+    .dot.today{outline:2px solid var(--acc)}
+
+    .footer{margin-top:18px;color:var(--sub);font-size:12px}
+    .spacer{height:6px}
+    .danger{background:var(--bad)!important;color:#2a0c10}
+    .warn{background:var(--warn)!important;color:#231a05}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#0e141b;border:1px solid #1a2330;color:var(--sub);font-size:11px}
+  </style>
+</head>
+<body>
+  <div class="app" id="app"></div>
+
+<script>
+// -------------------- Utilities --------------------
+const $ = sel => document.querySelector(sel);
+const el = (tag, attrs={}, ...children) => {
+  const node = document.createElement(tag);
+  Object.entries(attrs).forEach(([k,v])=>{
+    if(k.startsWith('on') && typeof v==='function') node.addEventListener(k.slice(2),v);
+    else if(v===true) node.setAttribute(k, k);
+    else if(v!==false && v!=null) node.setAttribute(k, v);
+  });
+  for(const c of children){ if(c==null) continue; if(typeof c==='string') node.appendChild(document.createTextNode(c)); else node.appendChild(c); }
+  return node;
+};
+const todayISO = () => new Date().toISOString().slice(0,10);
+const fmtDateShort = d => new Date(d).toLocaleDateString(undefined,{month:'short',day:'numeric'});
+
+// -------------------- Storage (plain localStorage) --------------------
+const KEY = 'lm_v2_plain';
+const blankData = () => ({
+  createdAt: new Date().toISOString(),
+  columns: [
+    { id: 'backlog', name: 'Backlog', order: 0 },
+    { id: 'doing', name: 'Doing', order: 1 },
+    { id: 'done', name: 'Done', order: 2 },
+  ],
+  tasks: [], // {id, title, note, columnId, createdAt}
+  habits: [], // {id, name, createdAt}
+  marks: {}, // { habitId: [ISO date] }
+});
+
+function load(){
+  try{
+    const raw = localStorage.getItem(KEY);
+    return raw ? JSON.parse(raw) : blankData();
+  }catch{ return blankData(); }
+}
+function save(){ localStorage.setItem(KEY, JSON.stringify(DATA)); }
+function uuid(){ return 't' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
+
+let DATA = load();
+
+// -------------------- App Boot --------------------
+function bootstrap(){ renderApp(); }
+
+// -------------------- UI: Main App --------------------
+function renderApp(){
+  const root = $('#app'); root.innerHTML = '';
+  const head = el('header',{},
+    el('div',{class:'brand'}, el('div',{class:'logo'}), el('h1',{},'Life Manager'), el('span',{class:'pill'}, new URL(location).host||'local')),
+    el('div',{class:'toolbar'},
+      el('button',{class:'ghost', onclick:()=>exportData()},'Export JSON'),
+      el('button',{class:'ghost', onclick:()=>importData()},'Import JSON'),
+      el('button',{class:'warn', onclick:()=>addSampleData()},'Sample Data'),
+      el('button',{class:'danger', onclick:()=>resetAll()},'Reset')
+    )
+  );
+  const tabs = el('div',{class:'tabs'},
+    el('div',{class:'tab active', id:'tab-kanban', onclick:()=>show('kanban')},'Kanban'),
+    el('div',{class:'tab', id:'tab-habits', onclick:()=>show('habits')},'Habits')
+  );
+  const area = el('div',{id:'area'});
+  $('#app').append(head, tabs, area);
+  show('kanban');
+}
+
+function show(which){
+  $('#tab-kanban').classList.toggle('active', which==='kanban');
+  $('#tab-habits').classList.toggle('active', which==='habits');
+  const area = $('#area'); area.innerHTML = '';
+  if(which==='kanban') renderKanban(area); else renderHabits(area);
+}
+
+// -------------------- Kanban --------------------
+function renderKanban(area){
+  const top = el('div',{class:'panel'},
+    el('div',{class:'row'},
+      el('input',{id:'newTaskTitle',placeholder:'Quick add task…', onkeydown:(e)=>{ if(e.key==='Enter') addTask(); }}),
+      el('button',{onclick:()=>addTask()},'Add')
+    ),
+    el('div',{class:'row',style:'margin-top:8px;gap:8px;flex-wrap:wrap'},
+      el('button',{class:'ghost',onclick:()=>addColumnPrompt()},'Add Column'),
+      el('span',{class:'sub'}, `${DATA.tasks.length} tasks`)
+    )
+  );
+  const colsWrap = el('div',{class:'cols'});
+  const cols = [...DATA.columns].sort((a,b)=>a.order-b.order);
+  for(const col of cols){ colsWrap.append(renderColumn(col)); }
+  area.append(top, colsWrap);
+}
+
+function addTask(){
+  const input = $('#newTaskTitle'); const title = input.value.trim(); if(!title) return;
+  const firstCol = [...DATA.columns].sort((a,b)=>a.order-b.order)[0];
+  DATA.tasks.push({id:uuid(), title, note:'', columnId:firstCol.id, createdAt:new Date().toISOString()});
+  input.value=''; save(); show('kanban');
+}
+function addColumnPrompt(){
+  const name = prompt('Column name'); if(!name) return;
+  const maxOrder = DATA.columns.reduce((m,c)=>Math.max(m,c.order), -1);
+  DATA.columns.push({id:uuid(), name: name.trim(), order:maxOrder+1});
+  save(); show('kanban');
+}
+
+function renderColumn(col){
+  const wrap = el('div',{class:'panel col', ondragover:(e)=>{e.preventDefault();}, ondrop:(e)=>onDrop(e,col.id)});
+  wrap.append(
+    el('header',{}, el('h2',{}, col.name), el('div',{},
+      el('span',{class:'pill'}, DATA.tasks.filter(t=>t.columnId===col.id).length+' tasks'), ' ',
+      el('span',{class:'link', onclick:()=>renameColumn(col)}, 'Rename') ,' · ',
+      el('span',{class:'link', onclick:()=>deleteColumn(col)}, 'Delete')
+    )),
+    el('div',{class:'drop'}, ...DATA.tasks.filter(t=>t.columnId===col.id).map(t=>renderTask(t)))
+  );
+  return wrap;
+}
+
+function renderTask(t){
+  const card = el('div',{class:'task', draggable:true, ondragstart:(e)=>{card.classList.add('dragging'); e.dataTransfer.setData('text/plain', t.id);}, ondragend:()=>card.classList.remove('dragging')},
+    el('div',{style:'display:flex;justify-content:space-between;align-items:center'},
+      el('strong',{}, t.title),
+      el('div',{},
+        el('span',{class:'link', onclick:()=>editTask(t)},'Edit'),' · ',
+        el('span',{class:'link', onclick:()=>delTask(t)},'Del')
+      )
+    ),
+    t.note ? el('small',{}, t.note) : null,
+    el('div',{}, el('small',{class:'sub'}, 'Created '+fmtDateShort(t.createdAt)))
+  );
+  return card;
+}
+
+function onDrop(e, columnId){
+  const id = e.dataTransfer.getData('text/plain');
+  const t = DATA.tasks.find(x=>x.id===id); if(!t) return;
+  t.columnId = columnId; save(); show('kanban');
+}
+
+function editTask(t){
+  const title = prompt('Title', t.title); if(title==null) return;
+  const note = prompt('Notes', t.note||''); if(note==null) return;
+  t.title = title.trim(); t.note = note.trim(); save(); show('kanban');
+}
+function delTask(t){ if(!confirm('Delete task?')) return; DATA.tasks = DATA.tasks.filter(x=>x.id!==t.id); save(); show('kanban'); }
+function renameColumn(col){ const name = prompt('New name', col.name); if(name==null) return; col.name = name.trim(); save(); show('kanban'); }
+function deleteColumn(col){ if(!confirm('Delete column and keep tasks? Tasks will move to Backlog.')) return; const fallback = DATA.columns[0]?.id; DATA.tasks.forEach(t=>{ if(t.columnId===col.id) t.columnId=fallback; }); DATA.columns = DATA.columns.filter(c=>c.id!==col.id); save(); show('kanban'); }
+
+// -------------------- Habits --------------------
+function renderHabits(area){
+  const top = el('div',{class:'panel'},
+    el('div',{class:'row'},
+      el('input',{id:'newHabit',placeholder:'Add a habit (e.g., “Run”, “Read”)', onkeydown:(e)=>{ if(e.key==='Enter') addHabit(); }}),
+      el('button',{onclick:()=>addHabit()},'Add')
+    ),
+    el('div',{class:'sub', style:'margin-top:8px'}, 'Click a day to toggle done. Shows the last 28 days.')
+  );
+  const list = el('div',{class:'grid'});
+  for(const h of DATA.habits){ list.append(renderHabit(h)); }
+  area.append(top, list);
+}
+
+function addHabit(){ const input = $('#newHabit'); const name = input.value.trim(); if(!name) return; DATA.habits.push({id:uuid(), name, createdAt:new Date().toISOString()}); input.value=''; save(); show('habits'); }
+function removeHabit(h){ if(!confirm('Delete habit and its marks?')) return; delete DATA.marks[h.id]; DATA.habits = DATA.habits.filter(x=>x.id!==h.id); save(); show('habits'); }
+
+function renderHabit(h){
+  const wrap = el('div',{class:'habit'});
+  const markMap = DATA.marks; if(!markMap[h.id]) markMap[h.id] = [];
+  const set = new Set(markMap[h.id]);
+  const days = []; const today = new Date();
+  for(let i=27;i>=0;i--){ const d=new Date(today); d.setDate(today.getDate()-i); days.push(d); }
+  const streak = (()=>{ let s=0; for(let i=0;i<days.length;i++){ const d=days[days.length-1-i]; const iso=d.toISOString().slice(0,10); if(set.has(iso)) s++; else break; } return s; })();
+  const grid = el('div',{class:'days'});
+  for(const d of days){
+    const iso = d.toISOString().slice(0,10);
+    const done = set.has(iso);
+    const dot = el('div',{class:'dot'+(done?' done':'')+(iso===todayISO()?' today':''), title: fmtDateShort(iso), onclick:()=>{ if(set.has(iso)) set.delete(iso); else set.add(iso); markMap[h.id]=[...set]; save(); show('habits'); }}, d.getDate().toString());
+    grid.append(dot);
+  }
+  wrap.append(
+    el('header',{},
+      el('strong',{}, h.name),
+      el('div',{}, el('span',{class:'pill'}, `${set.size} total`), ' ', el('span',{class:'pill'}, `streak ${streak}`), ' · ', el('span',{class:'link',onclick:()=>renameHabit(h)},'Rename'),' · ', el('span',{class:'link',onclick:()=>removeHabit(h)},'Delete'))
+    ),
+    grid
+  );
+  return wrap;
+}
+function renameHabit(h){ const name=prompt('New name',h.name); if(name==null) return; h.name=name.trim(); save(); show('habits'); }
+
+// -------------------- Export / Import / Samples / Reset --------------------
+function exportData(){
+  const blob = new Blob([JSON.stringify(DATA,null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = el('a',{href:url,download:'life-manager.backup.json'});
+  document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+function importData(){
+  const inp = el('input',{type:'file',accept:'application/json'});
+  inp.onchange = ()=>{
+    const f = inp.files[0]; if(!f) return;
+    const reader = new FileReader();
+    reader.onload = () => { try{ const obj = JSON.parse(reader.result); DATA = obj; save(); renderApp(); } catch{ alert('Invalid file'); } };
+    reader.readAsText(f);
+  };
+  inp.click();
+}
+function addSampleData(){ if(!confirm('Add example columns, tasks, and habits?')) return; const d = DATA; d.columns = [{id:'backlog',name:'Backlog',order:0},{id:'doing',name:'Doing',order:1},{id:'blocked',name:'Blocked',order:2},{id:'done',name:'Done',order:3}]; d.tasks=[{id:uuid(), title:'Plan week', note:'Sketch priorities', columnId:'backlog', createdAt:new Date().toISOString()},{id:uuid(), title:'Email X', note:'Follow up', columnId:'doing', createdAt:new Date().toISOString()},{id:uuid(), title:'Workout', note:'Push day', columnId:'done', createdAt:new Date().toISOString()}]; d.habits=[{id:uuid(), name:'Read 20m', createdAt:new Date().toISOString()},{id:uuid(), name:'Run', createdAt:new Date().toISOString()}]; d.marks = {}; save(); show('kanban'); }
+function resetAll(){ if(!confirm('Wipe local data?')) return; localStorage.removeItem(KEY); DATA = blankData(); save(); renderApp(); }
+
+// Init
+bootstrap();
+</script>
+</body>
+</html>
