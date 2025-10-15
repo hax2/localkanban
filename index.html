@@ -7,7 +7,7 @@
   <meta name="description" content="Local-first kanban + habits with client-side sign-in. Host anywhere static (e.g., GitHub Pages)." />
   <style>
     :root{
-      --bg:#0b0f14; --panel:#10161d; --muted:#0f1620; --muted-2:#1b2430; --text:#e6edf3; --sub:#9fb2c8; --acc:#3fa2ff; --good:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+      --bg:#0b0f14; --panel:#10161d; --board:#0c121a; --muted:#0f1620; --muted-2:#1b2430; --text:#e6edf3; --sub:#9fb2c8; --acc:#3fa2ff; --good:#22c55e; --warn:#f59e0b; --bad:#ef4444;
       --radius:14px; --gap:14px; --pad:16px; --ring:#7ad3ff;
       --shadow:0 10px 30px rgba(0,0,0,.35), 0 2px 8px rgba(0,0,0,.25);
     }
@@ -37,10 +37,12 @@
     input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
     label{font-size:12px;color:var(--sub)}
 
-    /* Kanban */
-    .cols{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
-    .col{min-height:220px}
-    .col header{justify-content:space-between;margin-bottom:10px;display:flex;align-items:center}
+    /* Board + Kanban Columns */
+    .board{background:var(--board);border:1px solid #111b27;border-radius:16px;padding:14px;box-shadow:var(--shadow)}
+    .cols{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:start}
+    .col{display:flex;flex-direction:column;gap:10px;background:#0e151e;border:1px solid #172233;border-radius:14px;padding:12px;min-height:280px}
+    .col header{display:flex;align-items:center;justify-content:space-between;padding-bottom:6px;border-bottom:1px solid #162132}
+    .col .body{flex:1;display:block}
     .task{background:var(--muted);border:1px solid #223047;border-radius:12px;padding:12px 12px;margin-bottom:12px;outline:0;transition:transform .06s ease, box-shadow .12s ease, border-color .12s ease}
     .task small{color:var(--sub)}
     .task:hover{transform:translateY(-1px);box-shadow:0 6px 14px rgba(0,0,0,.25)}
@@ -102,7 +104,7 @@ const fmtDateShort = d => new Date(d).toLocaleDateString(undefined,{month:'short
 const clamp = (n,min,max)=>Math.max(min,Math.min(max,n));
 
 // Nice toast notifications
-function notify(msg, type='info', ms=2400){
+function notify(msg, type='info', ms=2200){
   const wrap = $('#toasts');
   const n = el('div',{class:['toast', type]});
   n.append(el('span',{}, msg));
@@ -111,10 +113,12 @@ function notify(msg, type='info', ms=2400){
   n.addEventListener('click', ()=>{ clearTimeout(t); n.remove(); });
 }
 
-// Pretty confirm dialog -> Promise<boolean>
+// Pretty confirm dialog -> Promise<boolean> with Enter/Esc
 function confirmNice(message, {okText='OK', cancelText='Cancel'}={}){
   return new Promise(resolve=>{
-    const close=(val)=>{ modal.remove(); resolve(val); };
+    const close=(val)=>{ modal.remove(); window.removeEventListener('keydown', onKey); resolve(val); };
+    const okBtn = el('button',{onclick:()=>close(true)}, okText);
+    const cancelBtn = el('button',{class:'ghost',onclick:()=>close(false)}, cancelText);
     const modal = el('div',{class:'modal-backdrop', onclick:(e)=>{ if(e.target===modal) close(false); }},
       el('div',{class:'modal'},
         el('div',{class:'row',style:'justify-content:space-between;align-items:center'},
@@ -122,15 +126,13 @@ function confirmNice(message, {okText='OK', cancelText='Cancel'}={}){
           el('button',{class:'ghost',onclick:()=>close(false)},'Close')
         ),
         el('p',{}, message),
-        el('div',{class:'row',style:'justify-content:flex-end'},
-          el('button',{class:'ghost',onclick:()=>close(false)}, cancelText),
-          el('button',{onclick:()=>close(true)}, okText)
-        )
+        el('div',{class:'row',style:'justify-content:flex-end'}, cancelBtn, okBtn)
       )
     );
     document.body.append(modal);
-    const onEsc=(e)=>{ if(e.key==='Escape'){ e.preventDefault(); window.removeEventListener('keydown', onEsc); close(false);} };
-    window.addEventListener('keydown', onEsc);
+    const onKey=(e)=>{ if(e.key==='Escape'){ e.preventDefault(); close(false);} if(e.key==='Enter'){ e.preventDefault(); close(true);} };
+    window.addEventListener('keydown', onKey);
+    setTimeout(()=> okBtn.focus(), 0);
   });
 }
 
@@ -152,36 +154,40 @@ const blankData = () => ({
   marks: {}, // { habitId: [ISO date] }
 });
 
+function migrateOrBlank(){
+  try{
+    const prev = localStorage.getItem('lm_v2_plain');
+    if(prev){
+      const p = JSON.parse(prev);
+      const now = new Date().toISOString();
+      const migrated = blankData();
+      migrated.columns = p.columns || migrated.columns;
+      migrated.tasks = (p.tasks||[]).map(t=>({...t, projectId:'general'}));
+      migrated.habits = p.habits||[];
+      migrated.marks = p.marks||{};
+      migrated.createdAt = p.createdAt || now;
+      localStorage.setItem(KEY, JSON.stringify(migrated));
+      return migrated;
+    }
+  }catch{}
+  return blankData();
+}
+
 function load(){
   try{
     const raw = localStorage.getItem(KEY);
-    if(!raw){
-      // try migrate from previous key if present
-      const prev = localStorage.getItem('lm_v2_plain');
-      if(prev){
-        const p = JSON.parse(prev);
-        const now = new Date().toISOString();
-        const migrated = blankData();
-        migrated.columns = p.columns || migrated.columns;
-        migrated.tasks = (p.tasks||[]).map(t=>({...t, projectId:'general'}));
-        migrated.habits = p.habits||[];
-        migrated.marks = p.marks||{};
-        migrated.createdAt = p.createdAt || now;
-        localStorage.setItem(KEY, JSON.stringify(migrated));
-        return migrated;
-      }
-      return blankData();
-    }
+    if(!raw || raw==='undefined' || raw==='null') return migrateOrBlank();
     const obj = JSON.parse(raw);
+    if(!obj || !obj.columns || !obj.tasks || !obj.projects) return migrateOrBlank();
     // ensure defaults
     if(!obj.projects || obj.projects.length===0){ obj.projects = blankData().projects; }
     if(!obj.activeProjectId) obj.activeProjectId = obj.projects[0].id;
     if(obj.tasks) obj.tasks.forEach(t=>{ if(!t.projectId) t.projectId = obj.activeProjectId||'general'; });
     save(obj);
     return obj;
-  }catch{ return blankData(); }
+  }catch{ return migrateOrBlank(); }
 }
-function save(newData){ if(newData) DATA = newData; localStorage.setItem(KEY, JSON.stringify(DATA)); }
+function save(newData){ if(newData) DATA = newData; try{ localStorage.setItem(KEY, JSON.stringify(DATA)); }catch(e){ console.error('Save failed', e); notify('Save failed (storage full?)','bad'); } }
 function uuid(){ return 't' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
 
 let DATA = load();
@@ -239,10 +245,14 @@ function renderMain(){
       el('span',{class:'sub'}, `${DATA.tasks.filter(t=>t.projectId===DATA.activeProjectId).length} tasks in project`)
     )
   );
+
+  const board = el('div',{class:'board'});
   const colsWrap = el('div',{class:'cols'});
   const cols = [...DATA.columns].sort((a,b)=>a.order-b.order);
   for(const col of cols){ colsWrap.append(renderColumn(col)); }
-  wrap.append(top, colsWrap);
+  board.append(colsWrap);
+
+  wrap.append(top, board);
   return wrap;
 }
 
@@ -324,7 +334,7 @@ function openProjectsManager(p=null){
 function filteredTasksBy(colId){ return DATA.tasks.filter(t=>t.columnId===colId && t.projectId===DATA.activeProjectId); }
 
 function renderColumn(col){
-  const wrap = el('div',{class:'panel col', ondragover:(e)=>{e.preventDefault();}, ondrop:(e)=>onDrop(e,col.id)});
+  const wrap = el('div',{class:'col', ondragover:(e)=>{e.preventDefault();}, ondrop:(e)=>onDrop(e,col.id)});
   const p = DATA.projects.find(x=>x.id===DATA.activeProjectId);
   wrap.append(
     el('header',{},
@@ -335,7 +345,9 @@ function renderColumn(col){
         el('span',{class:'link', onclick:()=>deleteColumn(col)}, 'Delete')
       )
     ),
-    el('div',{class:'drop', "data-col": col.id}, ...filteredTasksBy(col.id).map(t=>renderTask(t, p)))
+    el('div',{class:'body'},
+      el('div',{class:'drop', "data-col": col.id}, ...filteredTasksBy(col.id).map(t=>renderTask(t, p)))
+    )
   );
   return wrap;
 }
@@ -401,8 +413,8 @@ function editTask(t){
     )
   );
   document.body.append(modal);
-  const onEsc=(e)=>{ if(e.key==='Escape'){ e.preventDefault(); window.removeEventListener('keydown', onEsc); modalClose(); } };
-  window.addEventListener('keydown', onEsc);
+  const onKey=(e)=>{ if(e.key==='Escape'){ e.preventDefault(); window.removeEventListener('keydown', onKey); modalClose(); } };
+  window.addEventListener('keydown', onKey);
 }
 
 async function delTask(t){ const ok = await confirmNice('Delete task?', {okText:'Delete', cancelText:'Cancel'}); if(!ok) return; DATA.tasks = DATA.tasks.filter(x=>x.id!==t.id); save(); renderApp(); notify('Task deleted','warn'); }
@@ -452,7 +464,6 @@ function importData(){
     const f = inp.files[0]; if(!f) return;
     const reader = new FileReader();
     reader.onload = () => { try{ const obj = JSON.parse(reader.result);
-      // basic sanity
       if(!obj.columns||!obj.tasks||!obj.habits||!obj.projects) throw new Error('Invalid');
       DATA = obj; save(); renderApp(); notify('Imported','good'); } catch{ notify('Invalid file','bad'); } };
     reader.readAsText(f);
